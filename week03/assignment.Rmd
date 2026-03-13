@@ -1,0 +1,82 @@
+---
+title: "Assignment week 3"
+author: "Noah"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+suppressPackageStartupMessages({
+  library(AnnotationHub)
+  library(Rsubread)      # read alignment
+  library(rtracklayer)   # read/write genomic file formats
+  library(Biostrings)    # handling sequences
+  library(Rfastp)        # read QC/trimming
+  library(epiwraps)
+})
+ah <- AnnotationHub()
+```
+
+# download
+
+```{r}
+dir.create("raw")
+download.file("https://www.encodeproject.org/files/ENCFF127RRR/@@download/ENCFF127RRR.fastq.gz","raw/CTCF", mode="wb")
+```
+
+# Trimming
+
+```{r}
+dir.create("rfastp.trimmed")
+qc <- lapply(c(ttk="raw/CTCF.fastq.gz"), FUN=function(x){
+  Rfastp::rfastp(x, thread=4, overrepresentationAnalysis=TRUE,
+                 outputFastq=file.path("rfastp.trimmed/",gsub("\\.fastq\\.gz$","",basename(x))))
+})
+```
+
+# plot
+
+```{r}
+Rfastp::curvePlot(qc$CTCF, curve="content_curves")
+```
+
+
+# alignment
+
+```{r}
+genome <- ah[["AH49674"]]
+dir.create("BDGP6_genome")
+export(import.2bit(genome), "BDGP6_genome/genome.fasta.gz", compress=TRUE)
+Rsubread::buildindex("BDGP6_genome/rsubread", reference="BDGP6_genome/genome.fasta.gz")
+dir.create("aligned")
+align.stats <- Rsubread::align(index="BDGP6_genome/rsubread", type="dna",
+                               readfile1=c("rfastp.trimmed/CTCF_R1.fastq.gz"),
+                               output_file=c("aligned/ttk.bam","aligned/input.bam"),
+                               nthreads=6, sortReadsByCoordinates=TRUE)
+align.stats
+```
+
+# peak calling
+
+```{r}
+dir.create("peaks")
+
+epiwraps::callPeaks(tfile="aligned/CTCF.bam", gsize="dm", outdir = "peaks", name = "CTCF")
+```
+
+
+```{r}
+head(peaks)
+
+plotSignalTracks(list(ttk="aligned/CTCF.bam", input="aligned/input.bam"), region=peaks[3], extend=5000)
+
+# we're going to put both tracks on the same scale, and add the peaks coordinates:
+plotSignalTracks(list(CTCF="aligned/CTCF.bam", peaks=peaks, input="aligned/input.bam"), region=peaks[3],
+                 extend=5000, tracks.params=list(ylim=c(0,80)))
+```
+
